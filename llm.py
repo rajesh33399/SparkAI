@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq")
 
+# NOTE: llama-3.1-8b-instant was deprecated by Groq on 2026-06-17 and fully
+# decommissioned on 2026-08-16 — it no longer works at all. Using Groq's
+# official 1:1 replacement below. If you ever see 100% Groq failures again,
+# check https://console.groq.com/docs/deprecations first before anything else.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 GEMINI_TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
 
@@ -302,7 +306,7 @@ def ask_llm_stream(
                 if produced_any:
                     return
         except Exception as e:
-    logger.warning(f"Groq failed or unavailable, trying fallback/Gemini... ({type(e).__name__}: {e})")
+            logger.warning(f"Groq failed or unavailable, trying fallback/Gemini... ({type(e).__name__}: {e})")
 
     try:
         client = _get_gemini_client()
