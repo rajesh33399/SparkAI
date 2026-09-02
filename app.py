@@ -9,6 +9,7 @@ import time
 import uuid
 import zipfile
 
+import bleach
 import fitz  # pymupdf — renders PDF pages to images for OCR fallback
 import markdown as md_lib
 import pytesseract
@@ -78,8 +79,35 @@ def switch_to(chat_id: str) -> None:
     st.session_state.confirm_delete_id = None
 
 
+# Allow-list for sanitizing the LLM's rendered Markdown output. Applied to
+# the HTML *after* markdown.markdown() runs (see _build_bubble_html) rather
+# than escaping the raw text *before* it — escaping first double-escapes
+# entities inside code blocks/tables (markdown.markdown() escapes its own
+# code content too, so an already-escaped '&gt;' becomes '&amp;gt;', which
+# the browser then shows as the literal text "&gt;" instead of ">"). This
+# way Markdown sees the real, unescaped text and formats it correctly, and
+# bleach strips anything dangerous (e.g. a stray "<script>") from the
+# HTML it actually produced, so a message still can't execute arbitrary
+# markup.
+_ALLOWED_TAGS = [
+    "p", "br", "hr", "strong", "em", "b", "i", "u", "s", "del", "sub", "sup",
+    "ul", "ol", "li", "blockquote", "pre", "code", "span", "div",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a",
+]
+_ALLOWED_ATTRS = {
+    "a": ["href", "title", "target", "rel"],
+    "*": ["class"],
+}
+
+
 def _build_bubble_html(role: str, content: str) -> str:
-    body_html = md_lib.markdown(html.escape(content), extensions=["sane_lists"])
+    raw_html = md_lib.markdown(
+        content,
+        extensions=["sane_lists", "tables", "fenced_code", "nl2br"],
+    )
+    body_html = bleach.clean(raw_html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
     if role == "user":
         return f'<div class="sparkai-msg sparkai-user"><div class="sparkai-bubble">{body_html}</div></div>'
     return (
@@ -92,9 +120,10 @@ def _build_bubble_html(role: str, content: str) -> str:
 def render_message_bubble(role: str, content: str) -> None:
     """Render one text message as a self-authored HTML bubble — right-aligned
     grey pill for the user, left-aligned plain text with a sparkle for the
-    assistant. Content is HTML-escaped first (so a stray '<script>' typed by
-    the user, or echoed back from an uploaded document, can't execute), then
-    run through Markdown so bold/lists/links from the LLM still render."""
+    assistant. Content is run through Markdown (tables, fenced code, lists,
+    etc. all render), then the resulting HTML is sanitized against an
+    allow-list (see _build_bubble_html) so a stray '<script>' typed by the
+    user, or echoed back from an uploaded document, can't execute."""
     st.markdown(_build_bubble_html(role, content), unsafe_allow_html=True)
 
 
@@ -573,6 +602,41 @@ st.markdown("""
     .sparkai-bubble p:first-child { margin-top: 0; }
     .sparkai-bubble p:last-child { margin-bottom: 0; }
     .sparkai-bubble ol, .sparkai-bubble ul { margin: 6px 0; padding-left: 22px; }
+
+    /* Tables coming from the LLM's Markdown (see _build_bubble_html) —
+       Streamlit's own theme doesn't style raw <table> tags inside our
+       self-authored bubble HTML, so without this they render unstyled
+       (no borders/spacing) even once the "tables" extension is parsing
+       them correctly. */
+    .sparkai-bubble table {
+        border-collapse: collapse;
+        margin: 8px 0;
+        width: 100%;
+    }
+    .sparkai-bubble th, .sparkai-bubble td {
+        border: 1px solid #e0e0e0;
+        padding: 6px 10px;
+        text-align: left;
+    }
+    .sparkai-bubble th {
+        background-color: #f8f9fa;
+    }
+    .sparkai-bubble pre {
+        background-color: #f6f8fa;
+        border-radius: 8px;
+        padding: 12px 14px;
+        overflow-x: auto;
+    }
+    .sparkai-bubble code {
+        background-color: #f0f1f3;
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 0.9em;
+    }
+    .sparkai-bubble pre code {
+        background-color: transparent;
+        padding: 0;
+    }
 
     /* ---- Reskin the chat_input's built-in attach control to a plain
        "+" instead of the default paperclip, to match Gemini. This targets
