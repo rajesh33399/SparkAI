@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq")
 
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 GEMINI_TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
 
 # Pollinations — free, no-API-key text-to-image endpoint. Used for
@@ -301,8 +301,8 @@ def ask_llm_stream(
                         yield chunk.content
                 if produced_any:
                     return
-        except Exception:
-            logger.warning("Groq failed or unavailable, trying fallback/Gemini...")
+        except Exception as e:
+    logger.warning(f"Groq failed or unavailable, trying fallback/Gemini... ({type(e).__name__}: {e})")
 
     try:
         client = _get_gemini_client()
