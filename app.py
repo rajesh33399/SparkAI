@@ -21,7 +21,6 @@ from llm import (
     ask_llm_stream, generate_image, generate_video,
     VideoGenerationUnavailable, ImageGenerationUnavailable,
 )
-from persistence import load_user_chats, save_user_chats
 
 st.set_page_config(
     page_title="SparkAI",
@@ -31,44 +30,14 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------------------
-# Auth gate — everything below this point only runs for a logged-in user.
-# -------------------------------------------------------------------------
-if not st.user.is_logged_in:
-    st.markdown(
-        """
-        <div style="display:flex; flex-direction:column; align-items:center;
-                    justify-content:center; padding: 120px 0 60px 0;">
-            <div style="font-size: 56px; margin-bottom: 12px;">✨</div>
-            <div style="font-size: 30px; color:#1f1f1f; font-weight:600;">Welcome to SparkAI</div>
-            <div style="font-size: 15px; color:#5f6368; margin-top:6px;">
-                Sign in to save your chats and pick up where you left off.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    _l, mid, _r = st.columns([1, 1, 1])
-    with mid:
-        st.button("Continue with Google", on_click=st.login, use_container_width=True, type="primary")
-    st.stop()
-
-USER_EMAIL = st.user.email
-USER_NAME = st.user.get("name") or USER_EMAIL
-
-# -------------------------------------------------------------------------
 # Session state — each chat is its own entry: {title, messages, pinned,
 # mode, created, context}. `context` holds extracted text from any files
 # the user has uploaded into this chat, and gets passed to the LLM.
-#
-# Chats are namespaced per logged-in user and reloaded from persistent
-# storage whenever a new browser session starts for that user (or a
-# different user logs in on the same browser).
 # -------------------------------------------------------------------------
-if st.session_state.get("loaded_user") != USER_EMAIL:
-    st.session_state.chats = load_user_chats(USER_EMAIL)
+if "chats" not in st.session_state:
+    st.session_state.chats = {}
+if "current_chat_id" not in st.session_state:
     st.session_state.current_chat_id = None
-    st.session_state.loaded_user = USER_EMAIL
-
 if "show_search" not in st.session_state:
     st.session_state.show_search = False
 if "rename_target" not in st.session_state:
@@ -261,43 +230,46 @@ def render_assistant_message_actions(chat_id: str, idx: int, content: str, messa
     order matched to Gemini. Thumbs-up just highlights; thumbs-down
     highlights AND opens a 'What went wrong?' reason-pill card; copy is
     instant client-side (no visible box, no server round-trip); '⋯' opens
-    a compact menu with Branch in new chat / Listen / Report legal issue,
-    shown ABOVE the icon row. Both panels use real st.container(key=...)
-    calls styled via Streamlit's auto-generated '.st-key-<key>' CSS class — a white, rounded, soft-shadow floating card matching Gemini's
-    actual look — rather than Streamlit's flat-grey st.container(border=
-    True) or no styling at all. An earlier version tried hiding real
-    buttons inside a raw `display:none` div and clicking them via cross-
-    frame JS; that div-wrapping trick turned out to only work for
-    decorative content, not interactive widgets (the buttons rendered as
-    empty visible boxes instead of staying hidden — confirmed in
-    testing), so this drops that approach entirely in favor of plain
-    session_state-driven conditional rendering, which is slower by one
-    rerun but 100% reliable."""
+    a menu with Branch in new chat / Listen / Report legal issue, shown
+    ABOVE the icon row (matching the reference video) using real, native
+    st.button widgets with full text labels — not custom HTML. An earlier
+    version tried hiding real buttons inside a raw `display:none` div and
+    clicking them via cross-frame JS; that div-wrapping trick turned out
+    to only work for decorative content, not interactive widgets (the
+    buttons rendered as empty visible boxes instead of staying hidden —
+    confirmed in testing), so this drops that approach entirely in favor
+    of plain session_state-driven conditional rendering, which is slower
+    by one rerun but 100% reliable."""
     more_key = f"showmore_{chat_id}_{idx}"
     feedback = message.get("feedback")
     feedback_card_key = f"feedbackcard_{chat_id}_{idx}"
     speak_key = f"speaknow_{chat_id}_{idx}"
 
+    # "⋯" menu — rendered ABOVE the icon row per the Gemini reference.
+    # No border/box (removed per user feedback — Gemini's dropdown reads
+    # as a plain floating list, not an outlined container).
     if st.session_state.get(more_key):
-        _menu_spacer, menu_col = st.columns([4, 13])
-        with menu_col:
-            with st.container(key=f"morecard_{chat_id}_{idx}"):
-                if st.button("Branch in new chat", icon=":material/call_split:",
-                              key=f"branchbtn_{chat_id}_{idx}", type="tertiary"):
-                    _branch_chat(chat_id, idx)
-                    st.session_state[more_key] = False
-                    st.rerun()
-                if st.button("Listen", icon=":material/volume_up:",
-                              key=f"listenbtn_{chat_id}_{idx}", type="tertiary"):
-                    st.session_state[speak_key] = True
-                    st.session_state[more_key] = False
-                    st.rerun()
-                if st.button("Report legal issue", icon=":material/flag:",
-                              key=f"reportbtn_{chat_id}_{idx}", type="tertiary"):
-                    st.toast("Thanks — this has been reported.")
-                    st.session_state[more_key] = False
-                    st.rerun()
+        if st.button("Branch in new chat", icon=":material/call_split:",
+                      key=f"branchbtn_{chat_id}_{idx}", type="tertiary",
+                      use_container_width=True):
+            _branch_chat(chat_id, idx)
+            st.session_state[more_key] = False
+            st.rerun()
+        if st.button("Listen", icon=":material/volume_up:",
+                      key=f"listenbtn_{chat_id}_{idx}", type="tertiary",
+                      use_container_width=True):
+            st.session_state[speak_key] = True
+            st.session_state[more_key] = False
+            st.rerun()
+        if st.button("Report legal issue", icon=":material/flag:",
+                      key=f"reportbtn_{chat_id}_{idx}", type="tertiary",
+                      use_container_width=True):
+            st.toast("Thanks — this has been reported.")
+            st.session_state[more_key] = False
+            st.rerun()
 
+    # Fires browser text-to-speech once, right after 'Listen' is clicked
+    # above (the flag is cleared immediately so it only speaks once).
     if st.session_state.pop(speak_key, False):
         _speak_text(content, key=f"speak_{chat_id}_{idx}")
 
@@ -334,36 +306,60 @@ def render_assistant_message_actions(chat_id: str, idx: int, content: str, messa
             st.session_state[more_key] = not st.session_state.get(more_key, False)
             st.rerun()
 
+    # "What went wrong?" reason card — Gemini's actual bad-response flow,
+    # shown right under the icon row when thumbs-down is active. No
+    # border/box (removed per user feedback — Gemini's card reads as
+    # plain content, not an outlined container).
     if st.session_state.get(feedback_card_key):
-        with st.container(key=f"feedbackcard_{chat_id}_{idx}"):
-            col_title, col_close = st.columns([10, 1])
-            with col_title:
-                st.markdown("**What went wrong?**")
-                st.caption("Your feedback helps improve SparkAI.")
-            with col_close:
-                if st.button(" ", icon=":material/close:", key=f"closefb_{chat_id}_{idx}",
-                              type="tertiary", help="Close"):
+        col_title, col_close = st.columns([10, 1])
+        with col_title:
+            st.markdown("**What went wrong?**")
+            st.caption("Your feedback helps improve SparkAI.")
+        with col_close:
+            if st.button(" ", icon=":material/close:", key=f"closefb_{chat_id}_{idx}",
+                          type="tertiary", help="Close"):
+                st.session_state[feedback_card_key] = False
+                st.rerun()
+        reason_cols = st.columns(len(_BAD_RESPONSE_REASONS))
+        for reason_col, reason in zip(reason_cols, _BAD_RESPONSE_REASONS):
+            with reason_col:
+                if st.button(reason, key=f"reason_{chat_id}_{idx}_{reason}", type="tertiary"):
                     st.session_state[feedback_card_key] = False
+                    st.toast("Thanks for the detail — noted.")
                     st.rerun()
-            reason_cols = st.columns(len(_BAD_RESPONSE_REASONS))
-            for reason_col, reason in zip(reason_cols, _BAD_RESPONSE_REASONS):
-                with reason_col:
-                    if st.button(reason, key=f"reason_{chat_id}_{idx}_{reason}", type="tertiary"):
-                        st.session_state[feedback_card_key] = False
-                        st.toast("Thanks for the detail — noted.")
-                        st.rerun()
 
 
 # -------------------------------------------------------------------------
 # File parsing helpers
 # -------------------------------------------------------------------------
+
+# How short (in characters) the pypdf text-layer result has to be, across
+# the WHOLE document, before we bother firing up OCR. Keeps normal
+# text-based PDFs fast (no OCR needed) while still catching scanned /
+# handwritten / image-only PDFs that have no real text layer at all.
 OCR_FALLBACK_THRESHOLD = 20
+
+# OCR render quality: 2x zoom ≈ 144 DPI, a good balance of accuracy vs
+# speed. Bump to 3 if handwriting/small text is still coming out garbled.
 OCR_ZOOM = 2
+
+# Extensions this app knows how to read. Enforced in OUR Python code
+# (see extract_text_from_bytes / extract_zip_contents) rather than via
+# st.chat_input's built-in file_type client-side filter — that filter
+# checks the browser-reported MIME type, which mobile browsers frequently
+# report as empty/generic for files picked from apps like WhatsApp,
+# Gallery, or Google Drive, causing valid .pdf/.jpg files to be rejected
+# before they ever reach this server. Filtering by extension here instead
+# means mobile uploads work the same as desktop.
 SUPPORTED_DOC_EXTENSIONS = (".pdf", ".txt", ".md", ".zip")
 SUPPORTED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
 
 def _ocr_pdf(raw: bytes) -> str:
+    """Render every page of a PDF to an image and run Tesseract OCR on it.
+    Used when the PDF has no real text layer (scanned pages, handwritten
+    notes exported as images, etc.) so text extraction alone returns
+    nothing."""
     text_parts = []
     doc = fitz.open(stream=raw, filetype="pdf")
     try:
@@ -379,6 +375,11 @@ def _ocr_pdf(raw: bytes) -> str:
 
 
 def _extract_pdf_text_pymupdf(raw: bytes) -> str:
+    """PyMuPDF's text extraction. Generally more reliable than pypdf for
+    PDFs generated by design tools (Canva, Figma exports, some Word/Google
+    Docs pipelines) that place text in a content-stream order that doesn't
+    match the visual reading order — pypdf can silently drop or scramble
+    sections (columns, sidebars, icon-adjacent text) in those files."""
     doc = fitz.open(stream=raw, filetype="pdf")
     try:
         parts = [page.get_text("text") for page in doc]
@@ -394,6 +395,10 @@ def _extract_pdf_text_pypdf(raw: bytes) -> str:
 
 
 def _extract_pdf_text(raw: bytes) -> str:
+    # Run both extractors and keep whichever pulled more content. Neither
+    # is strictly "better" across all PDFs, but for a given file the one
+    # that returns substantially less text is the one that dropped
+    # sections — the longer result is the more complete one.
     try:
         text_pymupdf = _extract_pdf_text_pymupdf(raw)
     except Exception:
@@ -405,6 +410,8 @@ def _extract_pdf_text(raw: bytes) -> str:
 
     text = text_pymupdf if len(text_pymupdf) >= len(text_pypdf) else text_pypdf
 
+    # Neither extractor found a usable text layer at all (scanned /
+    # handwritten / image-only PDF) -> OCR as the last resort.
     if len(text) < OCR_FALLBACK_THRESHOLD:
         ocr_text = _ocr_pdf(raw)
         if ocr_text:
@@ -414,6 +421,9 @@ def _extract_pdf_text(raw: bytes) -> str:
 
 
 def extract_text_from_bytes(name: str, raw: bytes) -> str:
+    """Best-effort text extraction from a filename + raw bytes. Returns ''
+    (never raises) so one bad file can't crash the chat — callers decide
+    how to surface a failure."""
     lower = name.lower()
     try:
         if lower.endswith(".pdf"):
@@ -421,6 +431,8 @@ def extract_text_from_bytes(name: str, raw: bytes) -> str:
         if lower.endswith((".txt", ".md")):
             return raw.decode("utf-8", errors="ignore").strip()
         if lower.endswith(SUPPORTED_IMAGE_EXTENSIONS):
+            # A photo/scan of notes uploaded directly (not wrapped in a
+            # PDF) -> OCR it the same way.
             img = Image.open(io.BytesIO(raw)).convert("RGB")
             return pytesseract.image_to_string(img).strip()
         return ""
@@ -429,6 +441,10 @@ def extract_text_from_bytes(name: str, raw: bytes) -> str:
 
 
 def extract_zip_contents(raw_zip: bytes) -> tuple[list[tuple[str, str]], list[str]]:
+    """Unzip in memory and extract text from every .pdf/.txt/.md/image entry
+    inside. Returns (successes, failures) where successes is a list of
+    (entry_name, text) and failures is a list of entry names that produced
+    no text (corrupt, unreadable, unsupported type, etc.)."""
     successes, failures = [], []
     try:
         with zipfile.ZipFile(io.BytesIO(raw_zip)) as zf:
@@ -465,13 +481,19 @@ if not st.session_state.chats:
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; color: #1f1f1f; }
+
+    /* ---- Sidebar base ---- */
     [data-testid="stSidebar"] {
         background-color: #f8f9fa !important;
         border-right: 1px solid #e0e0e0;
         padding-top: 10px;
     }
-    [data-testid="stSidebar"] * { color: #1f1f1f !important; }
-    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color: #5f6368 !important; }
+    [data-testid="stSidebar"] * {
+        color: #1f1f1f !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+        color: #5f6368 !important;
+    }
     [data-testid="stSidebar"] button {
         text-align: left !important;
         justify-content: flex-start !important;
@@ -493,17 +515,40 @@ st.markdown("""
         width: 100%;
         margin: 0 !important;
     }
-    [data-testid="stSidebar"] button:hover { background-color: #e8eaed !important; }
-    [data-testid="stSidebar"] [data-testid="stPopover"] button { padding: 4px 4px !important; }
-    [data-testid="stSidebar"] [data-testid="column"] { align-items: center; }
+    [data-testid="stSidebar"] button:hover {
+        background-color: #e8eaed !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stPopover"] button {
+        padding: 4px 4px !important;
+    }
+    [data-testid="stSidebar"] [data-testid="column"] {
+        align-items: center;
+    }
+    /* Non-button sidebar text (the "SparkAI" heading, "Recent" caption)
+       stays on one line and truncates instead of wrapping. */
     [data-testid="stSidebar"] h2,
     [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .sparkai-msg { display: flex; width: 100%; margin: 6px 0; }
-    .sparkai-msg.sparkai-user { justify-content: flex-end; }
+
+    /* ---- Gemini-style chat bubbles ----
+       Self-authored markup (see render_message_bubble in app.py), not a
+       reskin of Streamlit's internal chat_message DOM. The previous CSS
+       reskin approach targeted real testids/aria-labels confirmed to exist
+       in Streamlit's shipped frontend, but it still lost to Streamlit's
+       own runtime style injection in production — rather than keep
+       guessing at specificity/load-order blind, these classes are ours
+       end to end, so what you see here is exactly what ships. */
+    .sparkai-msg {
+        display: flex;
+        width: 100%;
+        margin: 6px 0;
+    }
+    .sparkai-msg.sparkai-user {
+        justify-content: flex-end;
+    }
     .sparkai-msg.sparkai-user .sparkai-bubble {
         background-color: #f0f1f3;
         border-radius: 20px;
@@ -511,13 +556,32 @@ st.markdown("""
         max-width: 70%;
         color: #1f1f1f;
     }
-    .sparkai-msg.sparkai-assistant { justify-content: flex-start; align-items: flex-start; gap: 8px; }
-    .sparkai-msg.sparkai-assistant .sparkai-sparkle { font-size: 13px; line-height: 1.8; flex-shrink: 0; }
-    .sparkai-msg.sparkai-assistant .sparkai-bubble { max-width: 85%; color: #1f1f1f; }
+    .sparkai-msg.sparkai-assistant {
+        justify-content: flex-start;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .sparkai-msg.sparkai-assistant .sparkai-sparkle {
+        font-size: 13px;
+        line-height: 1.8;
+        flex-shrink: 0;
+    }
+    .sparkai-msg.sparkai-assistant .sparkai-bubble {
+        max-width: 85%;
+        color: #1f1f1f;
+    }
     .sparkai-bubble p:first-child { margin-top: 0; }
     .sparkai-bubble p:last-child { margin-bottom: 0; }
     .sparkai-bubble ol, .sparkai-bubble ul { margin: 6px 0; padding-left: 22px; }
-    [data-testid="stChatInputFileUploadButton"] svg { display: none !important; }
+
+    /* ---- Reskin the chat_input's built-in attach control to a plain
+       "+" instead of the default paperclip, to match Gemini. This targets
+       Streamlit's real stChatInputFileUploadButton testid; if a future
+       Streamlit version renames it, this rule just silently no-ops and
+       you get the default paperclip icon back, not a broken layout. ---- */
+    [data-testid="stChatInputFileUploadButton"] svg {
+        display: none !important;
+    }
     [data-testid="stChatInputFileUploadButton"]::before {
         content: "+";
         font-size: 22px;
@@ -525,17 +589,9 @@ st.markdown("""
         line-height: 1;
         color: #5f6368;
     }
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    div[class*="st-key-morecard_"],
-    div[class*="st-key-feedbackcard_"] {
-        background: #ffffff !important;
-        border-radius: 12px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
-        padding: 14px 18px !important;
-        margin: 6px 0 !important;
-    }
-    div[class*="st-key-morecard_"] { max-width: 240px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -544,16 +600,6 @@ st.markdown("""
 # -------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("## ✨ SparkAI")
-
-    col_user, col_logout = st.columns([4, 1])
-    with col_user:
-        st.caption(f"👤 {USER_NAME}")
-    with col_logout:
-        if st.button(" ", icon=":material/logout:", key="btn_logout",
-                      type="tertiary", help="Log out"):
-            save_user_chats(USER_EMAIL, st.session_state.chats)
-            st.logout()
-
     st.markdown("")
 
     if st.button("💬  New chat", key="btn_new", use_container_width=True):
@@ -664,6 +710,12 @@ def _maybe_set_title_from_prompt(prompt: str) -> None:
 
 
 def _stream_assistant_reply(prompt: str, images=None) -> None:
+    """Streams a reply from the LLM and appends it to the current chat's
+    message list. Shared by the normal chat_input submit path AND the
+    'edit message' resend path (see the edit UI in the render loop below),
+    so both regenerate a response the exact same way. Assumes the user's
+    message has ALREADY been appended to chat["messages"] — history is
+    built from everything before it."""
     text_history = [m for m in chat["messages"][:-1] if m.get("type", "text") == "text"]
     response_container = st.empty()
     full_response = ""
@@ -679,6 +731,11 @@ def _stream_assistant_reply(prompt: str, images=None) -> None:
 
 chat_id = st.session_state.current_chat_id
 
+# ---- Handle a pending "regenerate response" request (from the assistant
+# message's ⋯ menu) BEFORE rendering messages, so the replaced text shows
+# immediately in the normal render loop below. Re-runs the same preceding
+# user prompt through the model and replaces the reply IN PLACE (keeps its
+# position in the conversation, clears any prior thumbs feedback on it). ----
 _regen_idx = st.session_state.regenerate_index.get(chat_id)
 if _regen_idx is not None:
     idx = _regen_idx
@@ -695,6 +752,7 @@ if _regen_idx is not None:
     st.session_state.regenerate_index[chat_id] = None
 
 
+# ---- Gemini-style empty state for a brand-new, untouched chat ----
 if not chat["messages"]:
     st.markdown("""
         <div style="display:flex; flex-direction:column; align-items:center;
@@ -705,12 +763,16 @@ if not chat["messages"]:
     """, unsafe_allow_html=True)
 
 
+# ---- render existing messages ----
 editing_idx = st.session_state.editing_index.get(chat_id)
 
 for idx, message in enumerate(chat["messages"]):
     msg_type = message.get("type", "text")
 
     if msg_type == "text" and message["role"] == "user" and idx == editing_idx:
+        # Inline edit mode for this message — Gemini-style: rewrite the
+        # prompt, then everything from here forward (this message and any
+        # replies after it) is dropped and regenerated fresh.
         new_text = st.text_area(
             "Edit your message", value=message["content"],
             key=f"editarea_{chat_id}_{idx}", label_visibility="collapsed",
@@ -749,7 +811,20 @@ for idx, message in enumerate(chat["messages"]):
     elif msg_type == "error":
         st.error(message["content"])
 
+# ---- input + generation, branched by mode ----
 if mode == "chat":
+    # NOTE: no `file_type=[...]` here on purpose. st.chat_input's built-in
+    # file_type filter validates against the browser-reported MIME type,
+    # which mobile browsers (iOS Safari, Android Chrome/Samsung Internet)
+    # frequently report as empty or generic for files coming from apps
+    # like WhatsApp, Gallery, or Google Drive — that caused valid .pdf/
+    # .jpg files to be rejected client-side before ever reaching this
+    # server, even though desktop worked fine. We accept anything the
+    # picker offers and instead filter by extension ourselves below via
+    # extract_text_from_bytes / extract_zip_contents (SUPPORTED_DOC_
+    # EXTENSIONS / SUPPORTED_IMAGE_EXTENSIONS) — genuinely unsupported
+    # files still get skipped, just via our own code instead of a flaky
+    # client-side MIME check.
     submission = st.chat_input(
         "Ask SparkAI",
         accept_file="multiple",
@@ -759,6 +834,10 @@ if mode == "chat":
         prompt = (submission.text or "").strip()
         files = submission.files or []
 
+        # Classify by extension, not by the browser's reported MIME type
+        # (submission.files[i].type) — same reasoning as above: mobile
+        # browsers often report an empty/generic type for gallery/shared
+        # files even though the filename extension is perfectly valid.
         def _is_image_file(f) -> bool:
             return f.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS)
 
@@ -790,14 +869,19 @@ if mode == "chat":
                 else:
                     failed.append(f.name)
             else:
+                # Extension not in our supported list at all — skip
+                # cleanly instead of silently dropping it with no feedback.
                 failed.append(f"{f.name} (unsupported file type)")
 
+        # Images go straight to the model as image data (not text-extracted).
+        # This only actually reaches the model on the Gemini path — see
+        # llm.py's ask_llm_stream, since Groq's chat model is text-only.
         pending_images = []
         for f in image_files:
             if f.name in chat["uploaded_files"]:
                 continue
             raw = f.read()
-            mime = f.type or "image/jpeg"
+            mime = f.type or "image/jpeg"  # fall back if browser omitted MIME
             pending_images.append((raw, mime))
             chat["uploaded_files"].append(f.name)
             newly_attached.append(f.name)
@@ -820,7 +904,13 @@ if mode == "chat":
                        f"or OCR couldn't read the image/handwriting clearly).")
 
         _stream_assistant_reply(prompt, images=pending_images or None)
-        save_user_chats(USER_EMAIL, st.session_state.chats)
+        # Without this rerun, the just-added assistant message only shows
+        # its action row (copy/edit/regenerate/etc) on the NEXT user
+        # interaction — the streamed reply above is drawn inline during
+        # THIS run, before it ever passes through the render loop that
+        # attaches those buttons. Rerunning immediately routes it through
+        # that same loop right away, so the icons appear instantly instead
+        # of one message late (confirmed bug from user testing).
         st.rerun()
 
 elif mode == "image":
@@ -848,7 +938,6 @@ elif mode == "image":
                     "role": "assistant", "type": "error",
                     "content": f"Couldn't generate that image: {e}",
                 })
-        save_user_chats(USER_EMAIL, st.session_state.chats)
 
 elif mode == "video":
     if prompt := st.chat_input("Describe the video you want to generate"):
@@ -875,9 +964,3 @@ elif mode == "video":
                     "role": "assistant", "type": "error",
                     "content": f"Couldn't generate that video: {e}",
                 })
-        save_user_chats(USER_EMAIL, st.session_state.chats)
-
-# Final safety-net save: catches sidebar-only mutations (rename, pin,
-# delete, new chat, branch, feedback clicks) that don't already save
-# above, so nothing is lost even if the user closes the tab right after.
-save_user_chats(USER_EMAIL, st.session_state.chats)
