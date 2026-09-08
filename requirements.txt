@@ -13,6 +13,8 @@ faiss-cpu
 sentence-transformers
 huggingface_hub
 bleach
+Markdown
+pdfplumber
 supabase
 Authlib
 --extra-index-url https://download.pytorch.org/whl/cpu
