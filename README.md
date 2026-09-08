@@ -175,46 +175,97 @@ SparkAI uses a modular, multi-path architecture that handles conversational chat
 
 ---
 
-## 🔄 RAG Pipeline Details
+### 📚 Retrieval-Augmented Generation (RAG)
 
-The document processing pipeline implements dynamic fallback logic to extract and structure data from both raw text files and scanned documents seamlessly:
+* **Document Question Answering:** Ask questions based on information contained in uploaded documents.
+* **Multi-Format Document Support:** Process PDF, DOCX, TXT, and Markdown-based document content where supported.
+* **Text Chunking:** Splits extracted document content into smaller chunks for efficient retrieval.
+* **Embedding Generation:** Generates semantic embeddings using **Hugging Face Sentence Transformers**.
+* **Vector Search:** Uses **FAISS** for semantic similarity search and document retrieval.
+* **Context-Aware Responses:** Relevant document content is supplied to the LLM to generate document-aware answers.
+* **Incremental Indexing:** Adds newly uploaded document chunks without unnecessarily re-processing previously indexed content.
+* **Document Hashing:** Identifies previously processed files and reduces redundant embedding generation.
+* **Persistent Vector Indexing:** Stores FAISS indexes locally for reuse.
+
+---
+
+## 🔄 RAG Pipeline Architecture
+
+The document processing pipeline routes multi-format files dynamically, applying dynamic OCR fallback when text extraction is insufficient:
 
 ```text
-Uploaded Document
-        │
-        ▼
-Document Format Router (PDF / DOCX / TXT / MD)
-        │
-        ▼
-Text Extraction
-        │
-        ▼
-Is Extracted Text Sufficient?
-  ├── Yes ──> Proceed to Chunking
-  └── No  ──> Tesseract OCR Engine (Fallback) ──> Proceed to Chunking
-        │
-        ▼
-Recursive Character Text Chunking
-        │
-        ▼
-Hugging Face Sentence Transformers (Embeddings)
-        │
-        ▼
-FAISS Vector Store Indexing
-        │
-        ▼
-Similarity Vector Search (Top-k Context Retrieval)
-        │
-        ▼
-Prompt Augmentation & Context Injected into LLM
-        │
-        ▼
-Streamed Response Generation
+                       ┌────────────────────────┐
+                       │   Uploaded Document    │
+                       │ (PDF / DOCX / TXT / MD)│
+                       └───────────┬────────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐
+                       │ Document Detection &   │
+                       │ Format Parser Router   │
+                       └───────────┬────────────┘
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         │                         │                         │
+         ▼                         ▼                         ▼
+┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
+│    PDF Loader    │      │   DOCX Loader    │      │  TXT / MD Loader │
+└────────┬─────────┘      └────────┬─────────┘      └────────┬─────────┘
+         │                         │                         │
+         └─────────────────────────┼─────────────────────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐
+                       │ Text Extraction        │
+                       └───────────┬────────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐        No (Low Text Density)
+                       │ Text Extracted Cleanly?├──────────────────────────────┐
+                       └───────────┬────────────┘                               │
+                                   │ Yes                                        │
+                                   ▼                                            ▼
+                       ┌────────────────────────┐                  ┌────────────────────────┐
+                       │ Recursive Text Chunker │                  │ Tesseract OCR Engine   │
+                       └───────────┬────────────┘                  └───────────┬────────────┘
+                                   │                                            │
+                                   │<───────────────────────────────────────────┘
+                                   ▼
+                       ┌────────────────────────┐
+                       │ Duplicate Removal &    │
+                       │ Sentence Embeddings    │
+                       │ (HuggingFace Model)    │
+                       └───────────┬────────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐
+                       │   FAISS Vector Store   │
+                       │     & Indexing         │
+                       └───────────┬────────────┘
+                                   │
+  User Query ──────────────────────┼────────────────────────────────────────────┐
+                                   ▼                                            │
+                       ┌────────────────────────┐                               │
+                       │ Vector Similarity Search│                               │
+                       │ (Top-K Context Search) │                               │
+                       └───────────┬────────────┘                               │
+                                   │                                            │
+                                   ▼                                            │
+                       ┌────────────────────────┐                               │
+                       │ Context-Augmented      │<──────────────────────────────┘
+                       │ Prompt Formulation     │
+                       └───────────┬────────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐
+                       │ Streaming LLM Response │
+                       │    (Gemini / Groq)     │
+                       └────────────────────────┘
 ```
 
-* **Dynamic OCR Fallback:** Automatically evaluates page text density to trigger OCR only on scanned or low-text PDF pages.
-* **Semantic Embeddings:** Uses Hugging Face Sentence Transformers to map chunked document content into a high-dimensional vector space.
-* **Vector Indexing:** FAISS indexes embeddings locally for near-instant similarity searches during user queries.
+* **Multi-Format Routing:** Uses dedicated parsers for PDF, DOCX, TXT, and Markdown files to maximize initial extraction quality.
+* **Dynamic OCR Fallback:** Automatically evaluates page-level text density to trigger Tesseract OCR on scanned or low-text documents.
+* **Semantic Vector Retrieval:** Generates embeddings via Hugging Face Sentence Transformers and performs top-K similarity search in FAISS to augment prompts with precise context.
 
 ---
 
