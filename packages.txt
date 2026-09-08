@@ -1,1 +1,3 @@
+-o Acquire::Check-Valid-Until=false
 tesseract-ocr
+libtesseract-dev
