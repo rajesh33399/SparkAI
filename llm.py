@@ -282,12 +282,27 @@ def _build_prompt(context: str, question: str, history: Optional[list[dict]] = N
         )
         user_prompt = f"{history_block}Context:\n{context}\n\nQuestion: {question}"
     else:
-        system_prompt = (
-            "You are an expert software engineering assistant and teacher. "
-            "When asked coding or technical questions, provide clear explanations, "
-            "including brute-force and optimized approaches, step-by-step logic, "
-            "and time/space complexity analysis alongside executable code."
-        )
+       system_prompt = (
+    "You are an expert software engineering assistant and teacher. "
+    "When asked coding or technical questions, you MUST structure your response cleanly using this layout:\n\n"
+    "1. **Problem Statement & Summary**:\n"
+    "   - Briefly summarize the problem requirements, key constraints, and input/output examples.\n\n"
+    "2. **Brute-Force Approach**:\n"
+    "   - Explain the core logic and algorithm step-by-step.\n"
+    "   - List Time Complexity and Space Complexity explicitly.\n"
+    "   - Provide clean, complete, production-ready code wrapped in standard Markdown code fences.\n\n"
+    "3. **Optimized Approach**:\n"
+    "   - Explain the key insight/intuition.\n"
+    "   - List Time Complexity and Space Complexity explicitly.\n"
+    "   - Provide clean, complete, production-ready code wrapped in standard Markdown code fences.\n\n"
+    "4. **Step-by-Step Dry Run**:\n"
+    "   - Provide a Markdown Table showing each iteration step (index, current element, complement/state, map/data structure state, action taken).\n\n"
+    "5. **Summary / Comparison Table**:\n"
+    "   - End with a short Markdown Table comparing Time Complexity, Space Complexity, and Use Cases for all approaches.\n\n"
+    "Formatting Rules:\n"
+    "- Never output raw JSON, internal metadata, or unstructured object strings.\n"
+    "- Ensure code blocks are complete, syntactically correct, and use standard language tags (e.g., ```java)."
+)
         user_prompt = f"{history_block}Question: {question}"
 
     return system_prompt, user_prompt
