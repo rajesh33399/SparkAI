@@ -5,6 +5,7 @@ generation, video generation, and document (PDF/ZIP/TXT) upload for RAG.
 import html
 import io
 import json
+import re
 import time
 import uuid
 import zipfile
@@ -79,6 +80,30 @@ def switch_to(chat_id: str) -> None:
     st.session_state.confirm_delete_id = None
 
 
+# Some LLM backends (notably "reasoning"/Harmony-format models such as
+# Groq's gpt-oss line — see llm.py's GROQ_MODEL comment) are known to
+# occasionally leak malformed internal tool-call/reasoning fragments into
+# the visible response as literal "[object Object]" tokens (the classic
+# JS Array/Object-to-string coercion artifact from a broken upstream
+# serialization step) — e.g. "...RENAME\n,[object Object],\n}". This is
+# never legitimate content, so it's stripped defensively before display
+# regardless of which model produced it. Swapping GROQ_MODEL to a
+# non-reasoning model (done in llm.py) should prevent this at the source;
+# this is just a safety net in case any future model leaks similarly.
+_OBJECT_OBJECT_RE = re.compile(r"\[object Object\]")
+_STRAY_COMMA_LINE_RE = re.compile(r"(?m)^[ \t]*,[ \t]*$\n?")
+_DOUBLE_COMMA_RE = re.compile(r"[ \t]*,[ \t]*,[ \t]*")
+
+
+def _strip_llm_artifacts(text: str) -> str:
+    if "[object Object]" not in text:
+        return text
+    cleaned = _OBJECT_OBJECT_RE.sub("", text)
+    cleaned = _DOUBLE_COMMA_RE.sub(", ", cleaned)
+    cleaned = _STRAY_COMMA_LINE_RE.sub("", cleaned)
+    return cleaned
+
+
 # Allow-list for sanitizing the LLM's rendered Markdown output. Applied to
 # the HTML *after* markdown.markdown() runs (see _build_bubble_html) rather
 # than escaping the raw text *before* it — escaping first double-escapes
@@ -103,6 +128,7 @@ _ALLOWED_ATTRS = {
 
 
 def _build_bubble_html(role: str, content: str) -> str:
+    content = _strip_llm_artifacts(content)
     raw_html = md_lib.markdown(
         content,
         extensions=["sane_lists", "tables", "fenced_code", "nl2br"],
