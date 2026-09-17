@@ -46,11 +46,26 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq")
 
-# NOTE: llama-3.1-8b-instant was deprecated by Groq on 2026-06-17 and fully
-# decommissioned on 2026-08-16 — it no longer works at all. Using Groq's
-# official 1:1 replacement below. If you ever see 100% Groq failures again,
-# check https://console.groq.com/docs/deprecations first before anything else.
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+# NOTE on model choice: llama-3.1-8b-instant was deprecated by Groq on
+# 2026-06-17 and fully decommissioned on 2026-08-16.
+#
+# The first replacement tried here was openai/gpt-oss-20b — DON'T switch
+# back to it (or any other "gpt-oss"/Harmony-format reasoning model) for
+# plain chat/Q&A. These models separate output into internal "reasoning"
+# and "final" channels, and under streaming that separation is known to
+# leak: fragments of the model's internal reasoning or malformed tool-call
+# JSON end up mixed into the visible content (e.g. stray "[object Object],"
+# tokens, or literal Harmony markup like "<|channel|>"). This is a
+# documented issue across every place gpt-oss is hosted (Groq's own
+# community forum, IBM WatsonX, self-hosted vLLM) — not something specific
+# to this app's code, and not fixable by changing how we call it, since we
+# aren't using tools/function-calling here at all.
+#
+# llama-3.3-70b-versatile is a stable, mature, non-reasoning Groq model —
+# no Harmony channel split, no leakage class of bug — and is Groq's own
+# general-purpose recommendation. Use this unless you specifically need a
+# reasoning model AND have tested it thoroughly for leakage first.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 GEMINI_TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
 
 # Pollinations — free, no-API-key text-to-image endpoint. Used for
