@@ -82,7 +82,7 @@ HF_MODEL_LOAD_TIMEOUT = int(os.environ.get("HF_MODEL_LOAD_TIMEOUT", "120"))
 
 MAX_CONTEXT_CHARS = int(os.environ.get("MAX_CONTEXT_CHARS", "40000"))
 MAX_HISTORY_CHARS = int(os.environ.get("MAX_HISTORY_CHARS", "800"))
-MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
+MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
 
 
 class VideoGenerationUnavailable(Exception):
@@ -268,8 +268,10 @@ def _build_prompt(context: str, question: str, history: Optional[list[dict]] = N
         user_prompt = f"{history_block}Context:\n{context}\n\nQuestion: {question}"
     else:
         system_prompt = (
-            "You are a concise, direct, and factual AI assistant. Answer the user's questions clearly "
-            "and accurately using your general knowledge without repeating yourself or stuttering."
+            "You are an expert software engineering assistant and teacher. "
+            "When asked coding or technical questions, provide clear explanations, "
+            "including brute-force and optimized approaches, step-by-step logic, "
+            "and time/space complexity analysis alongside executable code."
         )
         user_prompt = f"{history_block}Question: {question}"
 
