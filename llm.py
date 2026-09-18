@@ -265,6 +265,72 @@ def _get_gemini_client() -> "genai.Client":
 # ----------------------------------------------------
 # Prompt construction
 # ----------------------------------------------------
+
+# A dedicated, structured system prompt for coding/DSA-style questions —
+# modeled on the shape a good coding answer should have (problem restated,
+# brute-force pass, optimized pass, a concrete dry-run table, then a
+# summary comparison table). Without explicit structure like this, smaller
+# open models (which is what's running here — see the GROQ_MODEL note
+# above) tend to give a much thinner answer than a large frontier model
+# does by default, even though the underlying reasoning is often fine —
+# spelling out the exact sections closes most of that gap.
+_CODING_SYSTEM_PROMPT = (
+    "You are an expert software engineering assistant and teacher. When the "
+    "user asks a coding, algorithms, or data-structures question, structure "
+    "your ENTIRE answer using exactly this format, with real Markdown "
+    "headings (##) for each section — do not skip sections even if one "
+    "approach is trivial:\n\n"
+    "## Problem Statement\n"
+    "Restate the problem in your own words, including constraints and an "
+    "example input/output.\n\n"
+    "## 1. Brute-Force Approach\n"
+    "**Logic:** plain-language explanation.\n"
+    "**Algorithm (pseudocode):** a short pseudocode block.\n"
+    "**Code:** a complete, compilable code block in the language the user "
+    "asked for (or Java if unspecified).\n"
+    "**Complexity:** time and space, each with a one-line reason.\n\n"
+    "## 2. Optimized Approach\n"
+    "Same four subsections as above (Logic, Algorithm, Code, Complexity) "
+    "for the best known approach.\n\n"
+    "## 3. Dry Run\n"
+    "Pick one concrete example input and trace the OPTIMIZED approach over "
+    "it step by step AS A MARKDOWN TABLE (columns like step/index/state/"
+    "result — pick columns that fit this specific algorithm), ending in the "
+    "final answer.\n\n"
+    "## 4. Summary\n"
+    "A Markdown comparison table of every approach you gave (columns: "
+    "Approach, Time, Space, When to use), followed by one sentence on which "
+    "approach is recommended and why.\n\n"
+    "Always use real Markdown tables (a header row, a `---` separator row, "
+    "then data rows, each on its own line) for the dry run and summary — "
+    "never inline pipes in a single line of prose."
+)
+
+_GENERAL_SYSTEM_PROMPT = (
+    "You are a concise, direct, and factual AI assistant. Answer the user's "
+    "questions clearly and accurately using your general knowledge without "
+    "repeating yourself or stuttering."
+)
+
+_DOCUMENT_SYSTEM_PROMPT = (
+    "You are a helpful AI assistant. Use the provided document context to "
+    "answer the question accurately."
+)
+
+_CODING_KEYWORDS = (
+    "leetcode", "leet code", "algorithm", "dsa", "data structure", "complexity",
+    "big o", "time complexity", "space complexity", "dry run", "dry-run",
+    "brute force", "brute-force", "optimized approach", "code in java",
+    "code in python", "code in c++", "code in javascript", "write a function",
+    "write code", "implement", "hackerrank", "codeforces", "competitive programming",
+)
+
+
+def _looks_like_coding_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in _CODING_KEYWORDS)
+
+
 def _build_prompt(context: str, question: str, history: Optional[list[dict]] = None) -> tuple:
     context = context.strip()[:MAX_CONTEXT_CHARS]
 
@@ -277,32 +343,13 @@ def _build_prompt(context: str, question: str, history: Optional[list[dict]] = N
             history_block = snippet[:MAX_HISTORY_CHARS]
 
     if context:
-        system_prompt = (
-            "You are a helpful AI assistant. Use the provided document context to answer the question accurately."
-        )
+        system_prompt = _DOCUMENT_SYSTEM_PROMPT
         user_prompt = f"{history_block}Context:\n{context}\n\nQuestion: {question}"
     else:
-       system_prompt = (
-    "You are an expert software engineering assistant and teacher. "
-    "When asked coding or technical questions, you MUST structure your response cleanly using this layout:\n\n"
-    "1. **Problem Statement & Summary**:\n"
-    "   - Briefly summarize the problem requirements, key constraints, and input/output examples.\n\n"
-    "2. **Brute-Force Approach**:\n"
-    "   - Explain the core logic and algorithm step-by-step.\n"
-    "   - List Time Complexity and Space Complexity explicitly.\n"
-    "   - Provide clean, complete, production-ready code wrapped in standard Markdown code fences.\n\n"
-    "3. **Optimized Approach**:\n"
-    "   - Explain the key insight/intuition.\n"
-    "   - List Time Complexity and Space Complexity explicitly.\n"
-    "   - Provide clean, complete, production-ready code wrapped in standard Markdown code fences.\n\n"
-    "4. **Step-by-Step Dry Run**:\n"
-    "   - Provide a Markdown Table showing each iteration step (index, current element, complement/state, map/data structure state, action taken).\n\n"
-    "5. **Summary / Comparison Table**:\n"
-    "   - End with a short Markdown Table comparing Time Complexity, Space Complexity, and Use Cases for all approaches.\n\n"
-    "Formatting Rules:\n"
-    "- Never output raw JSON, internal metadata, or unstructured object strings.\n"
-    "- Ensure code blocks are complete, syntactically correct, and use standard language tags (e.g., ```java)."
-)
+        system_prompt = (
+            _CODING_SYSTEM_PROMPT if _looks_like_coding_question(question)
+            else _GENERAL_SYSTEM_PROMPT
+        )
         user_prompt = f"{history_block}Question: {question}"
 
     return system_prompt, user_prompt
